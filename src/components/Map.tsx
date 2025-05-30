@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MapContainerProps } from '../types';
 import L from 'leaflet';
 import 'leaflet-routing-machine';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
+import axios from 'axios';
 
 export const MapContainer: React.FC<MapContainerProps> = ({ 
   currentLocation, 
@@ -23,7 +24,7 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       leafletMapRef.current = L.map(mapRef.current).setView([40.7128, -74.0060], 13);
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       }).addTo(leafletMapRef.current);
     }
 
@@ -76,6 +77,88 @@ export const MapContainer: React.FC<MapContainerProps> = ({
     });
   };
 
+  // Hotel popup component with image gallery
+  const HotelPopup = ({ hotel }: { hotel: any }) => {
+    const [images, setImages] = useState<string[]>([]);
+    const [mainImage, setMainImage] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState<boolean>(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+      const fetchImages = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+          const response = await axios.get('http://localhost:5000/api/hotels/images', {
+            params: { hotelName: hotel.name }
+          });
+          if (response.data && response.data.images?.length > 0) {
+            setImages(response.data.images);
+            setMainImage(response.data.images[0]);
+          } else {
+            setImages([]);
+            setMainImage(null);
+          }
+        } catch (error) {
+          console.error('Error fetching hotel images:', error);
+          setError('Failed to load images');
+          setImages([]);
+          setMainImage(null);
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      fetchImages();
+    }, [hotel.name]);
+
+    const handleThumbnailClick = (image: string) => {
+      setMainImage(image);
+    };
+
+    return (
+      <div className="w-64 p-2">
+        <h3 className="text-lg font-medium text-neutral-800">{hotel.name}</h3>
+        <p className="text-sm text-neutral-600">{hotel.address}</p>
+        <p className="text-sm text-neutral-600">{(hotel.distance / 1000).toFixed(2)} km away</p>
+        <div className="flex flex-col sm:flex-row gap-2 mt-2">
+          {/* Main Image */}
+          <div className="w-full sm:w-3/4">
+            {isLoading ? (
+              <div className="w-full h-32 flex items-center justify-center bg-neutral-100 rounded-md">
+                <span className="text-neutral-600">Loading...</span>
+              </div>
+            ) : error ? (
+              <div className="w-full h-32 flex items-center justify-center bg-neutral-100 rounded-md">
+                <span className="text-error-500 text-sm">{error}</span>
+              </div>
+            ) : (
+              <img
+                src={mainImage || 'https://via.placeholder.com/240x120?text=No+Image+Available'}
+                alt={hotel.name}
+                className="w-full h-32 object-cover rounded-md"
+              />
+            )}
+          </div>
+          {/* Thumbnail Gallery */}
+          {images.length > 1 && (
+            <div className="flex sm:flex-col gap-1 overflow-x-auto sm:overflow-y-auto max-h-32">
+              {images.map((image, index) => (
+                <img
+                  key={index}
+                  src={image}
+                  alt={`${hotel.name} thumbnail ${index + 1}`}
+                  className={`w-12 h-12 object-cover rounded-md cursor-pointer ${image === mainImage ? 'border-2 border-accent-500' : 'border border-neutral-200'}`}
+                  onClick={() => handleThumbnailClick(image)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Update map markers and circle
   useEffect(() => {
     if (!leafletMapRef.current) return;
@@ -108,17 +191,20 @@ export const MapContainer: React.FC<MapContainerProps> = ({
       }).addTo(leafletMapRef.current);
     }
 
-    // Add hotel markers
+    // Add hotel markers with gallery popup
     hotels.forEach(hotel => {
       const isSelected = selectedHotel && selectedHotel.id === hotel.id;
       const hotelMarker = L.marker([hotel.latitude, hotel.longitude], { icon: createHotelIcon(isSelected) })
-        .addTo(leafletMapRef.current!)
-        .bindPopup(`
-          <strong>${hotel.name}</strong><br>
-          ${hotel.address}<br>
-          <span class="text-sm">${(hotel.distance / 1000).toFixed(2)} km away</span>
-        `);
-        
+        .addTo(leafletMapRef.current!);
+
+      // Create a DOM element for the popup content
+      const popupContent = document.createElement('div');
+      // Render the HotelPopup component into the popup content
+      import('react-dom').then(ReactDOM => {
+        ReactDOM.render(<HotelPopup hotel={hotel} />, popupContent);
+      });
+
+      hotelMarker.bindPopup(popupContent, { maxWidth: 300, minWidth: 280 });
       hotelMarker.on('click', () => onHotelSelect(hotel));
       markersRef.current.push(hotelMarker);
     });
